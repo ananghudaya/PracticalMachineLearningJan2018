@@ -1,0 +1,219 @@
+---
+title: "Practical Machine Learning - Prediction Assignment"
+author: "Anang Hudaya Muhamad Amin"
+date: "January 18, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Practical Machine Learning Project
+
+## A. Overview
+
+This is a final report for the peer assessment project in Coursera's **Practical Machine Learning** course offered by Johns Hopkins University, as part of the Specialization in Data Science.
+
+This report was developed on RStudio, using knitr tool, and meant to be published as a html page. The project consists of two different parts namely prediction assignment writeup and course quiz. The main goal of this project is to perform data analysis on the workout/exercise patterns, in identifying the quality of the respective workout being carried out. In achieving this, we going to use specific datasets of 6 participants performed specific workout actions as described in the next section. A number of machine learning algorithms will be used to train and test the accuracy of the prediction. Eventually, the algorithm which gives highest accuracy will be applied to test cases, as part of the course project prediction quiz.
+
+## B. Project Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## C. Exploratory Analysis
+
+### i. Dataset Overview
+
+The full dataset could be retrieved from: http://groupware.les.inf.puc-rio.br/har 
+
+Information about the project on collecting quantitative measurement on workout activity could be referred further in: 
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. **"Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13)".** Stuttgart, Germany: ACM SIGCHI, 2013.
+
+The training dataset for this project is retrieved from the following site:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv 
+
+While the test dataset could be retrieved from: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The dataset is in the format of csv file, containing about 160 attributes.
+
+Credits should be given to the above authors for their work. The following paragraph is taken from their website, which provides a short description of the dataset:
+
+"Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E)."
+
+From the description above, Class A is the most accurate representation of correct execution of the exercise, while the remaining classes (B,C,D, and E) indicate common mistakes. 
+
+### ii. Preparing the Environment
+
+In order to start with the analysis process, we prepare the working environment with necessary tools and libraries:
+
+```{r prep_env, results='hide', message=FALSE, warning=FALSE}
+rm(list=ls())                # free up memory for the download of the data sets
+library(knitr)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(corrplot)
+set.seed(56789)
+```
+
+### iii. Data Loading and Cleaning
+
+The dataset used in this project can be directly downloaded from the two URLs given in the previous subsection. The training dataset is then be partitioned to create a Training set (70% of the data) for the modeling process and a Test set (with the remaining 30%) for the validations. The testing dataset will remain unchanged and will only be used for the quiz results generation.
+
+```{r loadclean}
+# Set the URL for download
+TrainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+TestUrl  <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+# download the datasets
+trainData <- read.csv(url(TrainUrl))
+testData  <- read.csv(url(TestUrl))
+
+# partition the training dataset 
+inTrain  <- createDataPartition(trainData$classe, p=0.7, list=FALSE)
+TrainingSet <- trainData[inTrain, ]
+TestingSet  <- trainData[-inTrain, ]
+
+# viewing TrainingSet data structure
+str(TrainingSet)
+
+# viewing TestingSet data structure
+str(TestingSet)
+```
+
+Both datasets have 160 variables. As shown from the output of the code above, there are many variables with NA, that can be removed. The following procedure is carried out to remove the Near Zero variance (NZV) variables as well as variables with most NA values.
+
+```{r removeNA}
+# remove variables with Nearly Zero Variance
+NearZero <- nearZeroVar(TrainingSet)
+TrainingSet <- TrainingSet[, -NearZero]
+TestingSet  <- TestingSet[, -NearZero]
+
+# viewing TrainingSet data structure
+str(TrainingSet)
+
+# viewing TestingSet data structure
+str(TestingSet)
+
+# remove variables that are mostly NA
+MostNA    <- sapply(TrainingSet, function(x) mean(is.na(x))) > 0.95
+TrainingSet <- TrainingSet[, MostNA==FALSE]
+TestingSet  <- TestingSet[, MostNA==FALSE]
+
+
+# viewing TrainingSet data structure
+str(TrainingSet)
+
+# viewing TestingSet data structure
+str(TestingSet)
+```
+
+The dataset also contains identification only dataset (attributes 1 - 5). These columns will also be removed.
+
+```{r removeID}
+# remove identification only variables (columns 1 to 5)
+TrainingSet <- TrainingSet[, -(1:5)]
+TestingSet  <- TestingSet[, -(1:5)]
+
+# viewing TrainingSet data structure
+str(TrainingSet)
+
+# viewing TestingSet data structure
+str(TestingSet)
+## Including Plots
+```
+
+After all the cleaning procedures carried out, the dataset is reduced to 54 attributes. 
+
+### iv. Correlation Analysis
+
+In this section, we analyzed the correlation among the attributes (variables) within the training dataset. The following correlation plot shows the respective correlation. The highly correlated variables are shown in dark colors in the graph below.
+
+```{r corr, echo=FALSE, fig.height = 8, fig.width = 12}
+corMtx <- cor(TrainingSet[, -54])
+corrplot(corMtx, order = "FPC", method = "color", type = "upper", tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+#corrplot(corMtx, method = "circle")
+```
+
+## D. Prediction Models
+
+In this project, we will implement three machine lerning algorithms to model the regressions (in the Training dataset). The algorithm that produces highest accuracy on the test dataset  will be used for the quiz predictions. The algorithms include: Decision Tree, Random Forests and Generalized Boosted Model.
+
+To visualize the results of the prediction,  Confusion Matrix will be plotted at the end of each analysis.
+
+### i. Decision Trees
+
+```{r DT}
+# model fit - Decision Tree
+set.seed(56789)
+modFitDecTree <- rpart(classe ~ ., data=TrainingSet, method="class")
+fancyRpartPlot(modFitDecTree)
+
+# prediction on Test dataset
+predictDecTree <- predict(modFitDecTree, newdata=TestingSet, type="class")
+confMatDecTree <- confusionMatrix(predictDecTree, TestingSet$classe)
+confMatDecTree
+
+# plot matrix results
+plot(confMatDecTree$table, col = confMatDecTree$byClass, main = paste("Decision Tree - Accuracy =", round(confMatDecTree$overall['Accuracy'], 4)))
+```
+
+### ii. Random Forest
+
+```{r RandForest}
+# model fit Random Forest
+set.seed(56789)
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+modFitRandForest <- train(classe ~ ., data=TrainingSet, method="rf", trControl=controlRF)
+modFitRandForest$finalModel
+
+# prediction on Test dataset
+predictRandForest <- predict(modFitRandForest, newdata=TestingSet)
+confMatRandForest <- confusionMatrix(predictRandForest, TestingSet$classe)
+confMatRandForest
+
+# plot matrix results
+plot(confMatRandForest$table, col = confMatRandForest$byClass, main = paste("Random Forest - Accuracy =", round(confMatRandForest$overall['Accuracy'], 4)))
+```
+
+### iii. Generalized Boosted Model
+
+```{r GBM}
+# model fit - GBM
+set.seed(56789)
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modFitGBM  <- train(classe ~ ., data=TrainingSet, method = "gbm", trControl = controlGBM, verbose = FALSE)
+modFitGBM$finalModel
+
+# prediction on Test dataset
+predictGBM <- predict(modFitGBM, newdata=TestingSet)
+confMatGBM <- confusionMatrix(predictGBM, TestingSet$classe)
+confMatGBM
+
+# plot matrix results
+plot(confMatGBM$table, col = confMatGBM$byClass, main = paste("GBM - Accuracy =", round(confMatGBM$overall['Accuracy'], 4)))
+```
+
+## E. Selected Model
+
+Based on the analysis on different algorithms being used for the prediction model, we derived with the following results on identification accuracy:
+
+Decision Trees:  0.7448  
+Random Forest:  0.998  
+Generalized Boosted Model:  0.9905  
+
+In that case, the Random Forest model will be applied to predict the 20 quiz results (testing dataset) as shown below.
+
+```{r pTest}
+predictTEST <- predict(modFitRandForest, newdata=testData)
+predictTEST
+```
+
